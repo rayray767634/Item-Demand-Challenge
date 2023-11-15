@@ -20,9 +20,8 @@ item.train <- vroom("demandtrain.csv")
 
 item.test <- vroom("demandtest.csv")
 
-storeItem1 <- item.train %>%
-  filter(store == 1) %>%
-  filter(item == 24)
+storeItem <- item.train %>%
+  filter(store == 5, item == 38) 
 
 storeItem2 <- item.train %>%
   filter(store == 2) %>%
@@ -54,3 +53,43 @@ ACF4 <- storeItem4 %>%
 
 
 ACF1 + ACF2 + ACF3 + ACF4
+
+
+# ML for Time Series
+
+my_recipe <- recipe(sales~date , data = storeItem) %>%
+  step_date(date, features = c("dow","month","decimal"))
+
+
+prep <- prep(my_recipe)
+baked <- bake(prep, new_data = storeItem)
+
+
+# knn model
+knn_model <- nearest_neighbor(neighbors = tune()) %>%
+  set_mode("regression") %>%
+  set_engine("kknn")
+
+knn_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(knn_model)
+
+# fit or tune model
+
+tuning_grid_knn <- grid_regular(neighbors(),
+                                levels = 5)
+
+# Set up K-fold CV
+folds <- vfold_cv(storeItem, v = 5, repeats = 1)
+# Run the CV
+CV_results_knn <-knn_wf  %>%
+  tune_grid(resamples = folds,
+            grid = tuning_grid_knn,
+            metrics = metric_set(smape))
+
+bestTune_knn <- CV_results_knn %>%
+  select_best("smape")
+
+collect_metrics(CV_results_knn) %>%
+  filter(.metric == "smape") %>%
+  pull(mean)
