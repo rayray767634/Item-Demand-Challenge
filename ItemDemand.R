@@ -15,6 +15,7 @@ library(bonsai)
 library(lightgbm)
 library(dbarts)
 library(timetk)
+library(modeltime)
 
 item.train <- vroom("demandtrain.csv")
 
@@ -93,3 +94,96 @@ bestTune_knn <- CV_results_knn %>%
 collect_metrics(CV_results_knn) %>%
   filter(.metric == "smape") %>%
   pull(mean)
+
+# time series
+cv_split <- time_series_split(storeItem, assess = "3 months", cumulative = TRUE)
+cv_split %>%
+  tk_time_series_cv_plan() %>% # Puth into a data frame
+  plot_time_series_cv_plan(date,sales, .interactive = FALSE)
+
+es_model <- exp_smoothing() %>%
+  set_engine("ets") %>%
+  fit(sales~date, data = training(cv_split))
+
+# cross-validate to tune model
+cv_results <- modeltime_calibrate(es_model,
+                                  new_data = testing(cv_split))
+
+# visualize CV results
+p1 <- cv_results %>%
+  modeltime_forecast(
+    new_data = testing(cv_split),
+    actual_data = storeItem
+  ) %>%
+  plot_modeltime_forecast(.interactive = TRUE)
+
+# evaluate the accuracy
+cv_results %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(
+    .interactive = FALSE
+  )
+
+# refit to all data then forecast
+es_fullfit <- cv_results %>%
+  modeltime_refit(data = storeItem)
+
+es_preds <- es_fullfit %>%
+  modeltime_forecast(h = "3 months") %>%
+  rename(date = .index, sales = .value) %>%
+  select(date,sales) %>%
+  full_join(., y = item.test, by = "date") %>%
+  select(id, sales)
+
+p2 <- es_fullfit %>%
+  modeltime_forecast(h = "3 months", actual_data = storeItem) %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+
+
+
+cv_split2 <- time_series_split(storeItem2, assess = "3 months", cumulative = TRUE)
+cv_split2 %>%
+  tk_time_series_cv_plan() %>% # Puth into a data frame
+  plot_time_series_cv_plan(date,sales, .interactive = FALSE)
+
+es_model2 <- exp_smoothing() %>%
+  set_engine("ets") %>%
+  fit(sales~date, data = training(cv_split2))
+
+# cross-validate to tune model
+cv_results2 <- modeltime_calibrate(es_model2,
+                                  new_data = testing(cv_split2))
+
+# visualize CV results
+p3 <- cv_results2 %>%
+  modeltime_forecast(
+    new_data = testing(cv_split2),
+    actual_data = storeItem2
+  ) %>%
+  plot_modeltime_forecast(.interactive = TRUE)
+
+# evaluate the accuracy
+cv_results2 %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(
+    .interactive = FALSE
+  )
+
+# refit to all data then forecast
+es_fullfit2 <- cv_results2 %>%
+  modeltime_refit(data = storeItem2)
+
+es_preds2 <- es_fullfit %>%
+  modeltime_forecast(h = "3 months") %>%
+  rename(date = .index, sales = .value) %>%
+  select(date,sales) %>%
+  full_join(., y = item.test, by = "date") %>%
+  select(id, sales)
+
+p4 <- es_fullfit2 %>%
+  modeltime_forecast(h = "3 months", actual_data = storeItem2) %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+
+plotly::subplot(p1,p3,p2,p4, nrows = 2)
