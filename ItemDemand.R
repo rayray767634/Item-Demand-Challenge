@@ -187,3 +187,88 @@ p4 <- es_fullfit2 %>%
 
 
 plotly::subplot(p1,p3,p2,p4, nrows = 2)
+
+# ARIMA
+arima_recipe <- recipe(sales~date , data = storeItem) %>%
+  step_date(date, features = c("dow","month","decimal"))
+
+arima_model <- arima_reg(seasonal_period = 365,
+                         non_seasonal_ar = 5, # default max p to tune
+                         non_seasonal_ma = 5, # default max q to tune
+                         seasonal_ar = 2, # default max P to tune
+                         seasonal_ma = 2, # default max Q to tune
+                         non_seasonal_differences = 2, # default max D to tune
+                         seasonal_differences = 2) %>% # default max D to tune
+  set_engine("auto_arima")
+
+arima_wf <- workflow() %>%
+  add_recipe(arima_recipe) %>%
+  add_model(arima_model) %>%
+  fit(data = training(cv_split))
+
+cv_results <- modeltime_calibrate(arima_wf,
+                                  new_data = testing(cv_split))
+
+p1 <- cv_results %>%
+  modeltime_forecast(
+    new_data = testing(cv_split),
+    actual_data = storeItem
+  ) %>%
+  plot_modeltime_forecast(.interactive = TRUE)
+
+# evaluate the accuracy
+cv_results %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(
+    .interactive = FALSE
+  )
+
+# refit to all data then forecast
+es_fullfit <- cv_results %>%
+  modeltime_refit(data = storeItem)
+
+es_preds <- es_fullfit %>%
+  modeltime_forecast(h = "3 months") %>%
+  rename(date = .index, sales = .value) %>%
+  select(date,sales) %>%
+  full_join(., y = item.test, by = "date") %>%
+  select(id, sales)
+
+p2 <- es_fullfit %>%
+  modeltime_forecast(h = "3 months", actual_data = storeItem) %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+
+cv_results2 <- modeltime_calibrate(arima_wf,
+                                  new_data = testing(cv_split2))
+
+p3 <- cv_results2 %>%
+  modeltime_forecast(
+    new_data = testing(cv_split2),
+    actual_data = storeItem2
+  ) %>%
+  plot_modeltime_forecast(.interactive = TRUE)
+
+# evaluate the accuracy
+cv_results2 %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(
+    .interactive = FALSE
+  )
+
+# refit to all data then forecast
+es_fullfit <- cv_results2 %>%
+  modeltime_refit(data = storeItem2)
+
+es_preds <- es_fullfit %>%
+  modeltime_forecast(h = "3 months") %>%
+  rename(date = .index, sales = .value) %>%
+  select(date,sales) %>%
+  full_join(., y = item.test, by = "date") %>%
+  select(id, sales)
+
+p4 <- es_fullfit %>%
+  modeltime_forecast(h = "3 months", actual_data = storeItem) %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+plotly::subplot(p1,p3,p2,p4, nrows = 2)
