@@ -189,6 +189,12 @@ p4 <- es_fullfit2 %>%
 plotly::subplot(p1,p3,p2,p4, nrows = 2)
 
 # ARIMA
+
+storeItem_train <- item.train %>%
+  filter(store == 5, item == 38)
+storeItem_test <- item.test %>%
+  filter(store == 5, item == 38)
+
 arima_recipe <- recipe(sales~date , data = storeItem) %>%
   step_date(date, features = c("dow","month","decimal"))
 
@@ -225,7 +231,7 @@ cv_results %>%
 
 # refit to all data then forecast
 es_fullfit <- cv_results %>%
-  modeltime_refit(data = storeItem)
+  modeltime_refit(data = storeItem_train)
 
 es_preds <- es_fullfit %>%
   modeltime_forecast(h = "3 months") %>%
@@ -269,6 +275,83 @@ es_preds <- es_fullfit %>%
 
 p4 <- es_fullfit %>%
   modeltime_forecast(h = "3 months", actual_data = storeItem) %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+plotly::subplot(p1,p3,p2,p4, nrows = 2)
+
+# prophet model
+
+prophet_model <- prophet_reg() %>%
+  set_engine(engine = "prophet") %>%
+  fit(sales ~ date, data = training(cv_split))
+
+## calibrate workflow
+
+cv_results <- modeltime_calibrate(prophet_model,
+                                  new_data = testing(cv_split))
+
+# visualize CV results
+p1 <- cv_results %>%
+  modeltime_forecast(
+    new_data = testing(cv_split),
+    actual_data = storeItem
+  ) %>%
+  plot_modeltime_forecast(.interactive = TRUE)
+
+# evaluate the accuracy
+cv_results %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(
+    .interactive = FALSE
+  )
+
+# refit to all data then forecast
+prophet_fullfit <- cv_results %>%
+  modeltime_refit(data = storeItem)
+
+prophet_preds <- prophet_fullfit %>%
+  modeltime_forecast(h = "3 months") %>%
+  rename(date = .index, sales = .value) %>%
+  select(date,sales) %>%
+  full_join(., y = item.test, by = "date") %>%
+  select(id, sales)
+
+p2 <- prophet_fullfit %>%
+  modeltime_forecast(h = "3 months", actual_data = storeItem) %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+
+cv_results2 <- modeltime_calibrate(prophet_model,
+                                  new_data = testing(cv_split2))
+
+# visualize CV results
+p3 <- cv_results2 %>%
+  modeltime_forecast(
+    new_data = testing(cv_split2),
+    actual_data = storeItem2
+  ) %>%
+  plot_modeltime_forecast(.interactive = TRUE)
+
+# evaluate the accuracy
+cv_results2 %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(
+    .interactive = FALSE
+  )
+
+# refit to all data then forecast
+prophet_fullfit2 <- cv_results2 %>%
+  modeltime_refit(data = storeItem2)
+
+prophet_preds2 <- prophet_fullfit2 %>%
+  modeltime_forecast(h = "3 months") %>%
+  rename(date = .index, sales = .value) %>%
+  select(date,sales) %>%
+  full_join(., y = item.test, by = "date") %>%
+  select(id, sales)
+
+p4 <- prophet_fullfit2 %>%
+  modeltime_forecast(h = "3 months", actual_data = storeItem2) %>%
   plot_modeltime_forecast(.interactive = FALSE)
 
 plotly::subplot(p1,p3,p2,p4, nrows = 2)
