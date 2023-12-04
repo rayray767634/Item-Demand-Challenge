@@ -355,3 +355,60 @@ p4 <- prophet_fullfit2 %>%
   plot_modeltime_forecast(.interactive = FALSE)
 
 plotly::subplot(p1,p3,p2,p4, nrows = 2)
+
+
+# final model
+
+# read in data
+item <- vroom::vroom("demandtrain.csv")
+itemTest <- vroom::vroom("demandtest.csv")
+n.stores <- max(item$store)
+n.items <- max(item$item)
+
+# model
+item_recipe <- recipe(sales~., data=item) %>%
+  step_date(date, features=c("dow", "month", "decimal", "doy", "year")) %>%
+  step_range(date_doy, min=0, max=pi) %>%
+  step_mutate(sinDOY=sin(date_doy), cosDOY=cos(date_doy)) %>%
+  step_lencode_mixed(all_nominal_predictors(), outcome=vars(sales)) %>%
+  step_rm(date, item, store) %>%
+  step_normalize(all_numeric_predictors())
+boosted_model <- boost_tree(tree_depth=2, #Determined by random store-item combos
+                            trees=1200,
+                            learn_rate=0.01) %>%
+  set_engine("lightgbm") %>%
+  set_mode("regression")
+boost_wf <- workflow() %>%
+  add_recipe(item_recipe) %>%
+  add_model(boosted_model)
+
+## Double Loop over all store-item combos
+for(s in 1:n.stores){
+  for(i in 1:n.items){
+    
+    ## Subset the data
+    train <- item %>%
+      filter(store==s, item==i)
+    test <- itemTest %>%
+      filter(store==s, item==i)
+    
+    ## Fit the data and forecast
+    fitted_wf <- boost_wf %>%
+      fit(data=train)
+    preds <- predict(fitted_wf, new_data=test) %>%
+      bind_cols(test) %>%
+      rename(sales=.pred) %>%
+      select(id, sales)
+    
+    ## Save the results
+    if(s==1 && i==1){
+      all_preds <- preds
+    } else {
+      all_preds <- bind_rows(all_preds,
+                             preds)
+    }
+    
+  }
+}
+
+vroom_write(x=all_preds, "./submission.csv", delim=",")
